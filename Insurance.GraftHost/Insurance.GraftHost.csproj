@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AuthService\AuthService.csproj" />
+    <ProjectReference Include="..\DashboardService\DashboardService.csproj" />
+    <ProjectReference Include="..\PaymentService\PaymentService.csproj" />
+    <ProjectReference Include="..\PolicySearchService\PolicySearchService.csproj" />
+    <ProjectReference Include="..\PolicyService\PolicyService.csproj" />
+    <ProjectReference Include="..\PricingService\PricingService.csproj" />
+    <ProjectReference Include="..\ProductService\ProductService.csproj" />
+  </ItemGroup>
+
+</Project>

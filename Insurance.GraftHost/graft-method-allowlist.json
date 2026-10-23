@@ -1,0 +1,65 @@
+{
+  "modules": [
+    "ProductService.dll",
+    "PricingService.dll",
+    "PolicyService.dll",
+    "PolicySearchService.dll",
+    "PaymentService.dll",
+    "DashboardService.dll",
+    "AuthService.dll"
+  ],
+  "types": [
+    {
+      "publicApiType": "ProductService.Services.ProductCatalogService",
+      "methods": [
+        "FindAllProducts",
+        "FindProductByCode",
+        "CreateProductDraft",
+        "ActivateProduct",
+        "DiscontinueProduct"
+      ]
+    },
+    {
+      "publicApiType": "PricingService.Services.PriceCalculationService",
+      "methods": [
+        "CalculatePrice"
+      ]
+    },
+    {
+      "publicApiType": "PolicyService.Services.PolicySalesService",
+      "methods": [
+        "CreateOffer",
+        "CreatePolicy",
+        "GetPolicyDetails",
+        "TerminatePolicy"
+      ]
+    },
+    {
+      "publicApiType": "PolicySearchService.Services.PolicySearch",
+      "methods": [
+        "SearchPolicies"
+      ]
+    },
+    {
+      "publicApiType": "PaymentService.Services.PaymentAccountService",
+      "methods": [
+        "GetAccountBalance"
+      ]
+    },
+    {
+      "publicApiType": "DashboardService.Services.SalesDashboardService",
+      "methods": [
+        "GetAgentsSales",
+        "GetTotalSales",
+        "GetSalesTrends"
+      ]
+    },
+    {
+      "publicApiType": "AuthService.Services.AgentAuthService",
+      "methods": [
+        "Authenticate",
+        "GetAgentByLogin"
+      ]
+    }
+  ]
+}

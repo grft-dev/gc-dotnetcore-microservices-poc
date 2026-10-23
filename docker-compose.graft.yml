@@ -1,0 +1,48 @@
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: insurance-graft-sqlserver
+    ports:
+      - "1435:1433"
+    environment:
+      - ACCEPT_EULA=Y
+      - MSSQL_PID=Developer
+      - MSSQL_SA_PASSWORD=8jkGh47hnDw89H@q8LN2
+    healthcheck:
+      test: [ "CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"8jkGh47hnDw89H@q8LN2\" -C -Q \"SELECT 1\" || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  db-seed:
+    image: mcr.microsoft.com/mssql-tools
+    container_name: insurance-graft-db-seed
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    volumes:
+      - ./db/seed.sql:/seed.sql:ro
+    environment:
+      - SQLCMDPASSWORD=8jkGh47hnDw89H@q8LN2
+    entrypoint: ["/opt/mssql-tools/bin/sqlcmd", "-b", "-S", "sqlserver", "-U", "sa", "-i", "/seed.sql"]
+    restart: "no"
+
+  insurance-grafthost:
+    image: insurance/grafthost:1.0
+    build:
+      context: .
+      dockerfile: Insurance.GraftHost/Dockerfile
+    depends_on:
+      db-seed:
+        condition: service_completed_successfully
+    ports:
+      - "8092:80"
+      - "8093:81"
+    environment:
+      - PRODUCT_CN=server=sqlserver,1433;user id=sa;password=8jkGh47hnDw89H@q8LN2;database=Insurance;trustServerCertificate=true;
+      - PRICING_CN=server=sqlserver,1433;user id=sa;password=8jkGh47hnDw89H@q8LN2;database=Insurance;trustServerCertificate=true;
+      - POLICY_CN=server=sqlserver,1433;user id=sa;password=8jkGh47hnDw89H@q8LN2;database=Insurance;trustServerCertificate=true;
+      - POLICY_SEARCH_CN=server=sqlserver,1433;user id=sa;password=8jkGh47hnDw89H@q8LN2;database=Insurance;trustServerCertificate=true;
+      - PAYMENT_CN=server=sqlserver,1433;user id=sa;password=8jkGh47hnDw89H@q8LN2;database=Insurance;trustServerCertificate=true;
+      - DASHBOARD_CN=server=sqlserver,1433;user id=sa;password=8jkGh47hnDw89H@q8LN2;database=Insurance;trustServerCertificate=true;
+      - AUTH_CN=server=sqlserver,1433;user id=sa;password=8jkGh47hnDw89H@q8LN2;database=Insurance;trustServerCertificate=true;
