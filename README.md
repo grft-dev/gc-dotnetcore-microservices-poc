@@ -1,190 +1,243 @@
-# ASCLAB .NET Core PoC - LAB Insurance Sales Portal
+# Insurance sales portal — Graftcode port
 
-[![BuiltWithDot.Net shield](https://builtwithdot.net/project/409/microservices-on-net-core-sample/badge)](https://builtwithdot.net/project/409/microservices-on-net-core-sample)
+This repository is a fork of the [AltkomSoftware .NET microservices sample](https://github.com/asc-lab/dotnetcore-microservices-poc). It exists to show Graftcode in use: product, price, offer, policy, search, account, dashboard, and agent operations are hosted as grafts on Graftcode Gateway and checked with `gc-insurance-graft-e2e`.
 
-This is an example of a very simplified insurance sales system made in a microservice architecture using:
+The graft stack does not start RabbitMQ, ElasticSearch, Eureka, the Ocelot gateway, Hangfire, or SignalR. Legacy chat/UI/gateway projects have been removed from this port so the repository tracks only the GRAFT-hosted business path. Creating a policy writes the policy, the premium account, the search row, and the sales fact in one SQL transaction. CSV payment import stays outside the demo.
 
-- .NET 8
-- Entity Framework Core
-- MediatR
-- Marten
-- Eureka
-- Ocelot
-- JWT Tokens
-- RestEase
-- RawRabbit
-- NHibernate
-- Polly
-- NEST (ElasticSearch client)
-- Dapper
-- DynamicExpresso
-- SignalR
+## Testing note
 
-**Comprehensive guide describing the architecture, applied design patterns and technologies can be found on our blog:**
+We intentionally rolled back the recent attempt to restore legacy in-repo unit tests for this port. In this GRAFT shape, public entry points are static methods, and the original .NET test architecture does not isolate or mock static boundaries well without intrusive refactoring.
 
-- [Part 1 The Plan](https://www.altkomsoftware.com/blog/building-microservices-net-core-part-1-plan/)
-- [Part 2 Shaping microservice internal architecture with CQRS and MediatR](https://www.altkomsoftware.com/blog/microservices-net-core-cqrs-mediatr/)
-- [Part 3 Service Discovery with Eureka](https://www.altkomsoftware.com/blog/microservices-service-discovery-eureka/)
-- [Part 4 Building API Gateways With Ocelot](https://www.altkomsoftware.com/blog/building-api-gateways-with-ocelot/)
-- [Part 5 Marten An Ideal Repository For Your Domain Aggregates](https://www.altkomsoftware.com/blog/building-microservices-net-core-part-5-marten-ideal-repository-domain-aggregates/)
-- [Part 6 Real time server client communication with SignalR and RabbitMQ](https://www.altkomsoftware.com/blog/building-microservices-6/)
-- [Part 7 Transactional Outbox with RabbitMQ](https://www.altkomsoftware.com/blog/microservices-outbox-rabbitmq/)
+That restoration produced brittle tests with high maintenance cost and low confidence gain. For this port we prioritize integration and E2E verification of the exposed GRAFT surface, where business behavior is validated end-to-end.
 
-Other articles around microservices that could be interesting:
+## Migration impact (auditable slice KPI)
 
-- [CQRS and Event Sourcing Intro For Developers](https://www.altkomsoftware.com/blog/cqrs-event-sourcing/)
-- [From monolith to microservices – to migrate or not to migrate?](https://www.altkomsoftware.com/blog/monolith-microservices/)
-- [Event Storming — innovation in IT projects](https://www.altkomsoftware.com/blog/event-storming/)
+Operations currently exposed in this port include product catalog, pricing, offer creation, policy create/details/terminate, policy search, account balance, sales dashboard views, and agent authentication/profile lookup.
 
-## Business Case
+Known behavior and architecture differences versus the base implementation:
 
-We are going to build very simplified system for insurance agents to sell various kind of insurance products.
-Insurance agents will have to log in and system will present them with list of products they can sell. Agents will be able to view products and find a product appropriate for their customers. Then they can create an offer and system will calculate a price based on provided parameters. \
-Finally agent will be able to confirm the sale by converting offer to policy and printing pdf certificate. \
-Portal will also give them ability to search and view offer and policies. \
-Portal will also have some basic social network features like chat for agents. \
-Latest feature is a business dashboard that displays sales stats using ElasticSearch Aggregations and ChartJS.
+- **Auth:** the previous flow produced signed JWT tokens with expiry and claims; this port returns a text payload (`login|roles|avatar|products`) and profile lookup now takes login as an explicit argument.
+- **Policy search:** Elasticsearch MultiMatch (`BestFields`, fuzziness `AUTO`) was replaced by SQL `LIKE '%text%'`, `TOP 10`, sorted by policy number.
+- **New policy balance:** the previous `PolicyCreatedHandler` opened accounts without posting expected premium; this rewrite writes an `Expected` entry during policy creation, so starting balance differs.
+- **Consistency model:** RabbitMQ/outbox with separate projections was replaced by writing policy, account, search, and sales rows in one SQL transaction. This is an architecture simplification in this rewrite and is not attributable to Graftcode alone.
 
-## Architecture overview
+This repository also removes product surface that existed in the original sample: UI (`Web`, `BlazorWasmClient`), chat (`ChatService`), API gateway (`AgentPortalApiGateway`), and legacy in-repo tests. Because of that, whole-repository before/after percentages are not a fair comparison of the same product surface.
 
-<p align="center">
-    <img alt="NET Microservices Architecture" src="https://raw.githubusercontent.com/asc-lab/dotnetcore-microservices-poc/master/readme-images/dotnetcore-microservices-architecture.png" />
-</p>
+### Reproducible numbers (pinned refs)
 
-- **Web** - a VueJS Single Page Application that provides insurance agents ability to select appropriate product for their customers, calculate price, create an offer and conclude the sales process by converting offer to policy. This application also provides search and view functions for policies and offers. Frontend talks to backend services via `agent-portal-gateway`.
+Measured refs:
 
-- **Agent Portal API Gateway** - is a special microservice whose main purpose it to hide complexity of the underlying back office services structure from client application. Usually we create a dedicated API gateway for each client app. In case in the future we add a Xamarin mobile app to our system, we will need to build a dedicated API gateway for it. API gateway provides also security barrier and does not allow unauthenticated request to be passed to backend services. Another popular usage of API gateways is content aggregation from multiple services.
+- base: `6500daaf` (`origin/master` baseline used in review)
+- head: `83db31210fec5cda5f6e6685148ad6606950836b` (current `gc-port` head at measurement time)
 
-- **Auth Service** - a service responsible for users authentication. Our security system will be based on JWT tokens. Once user identifies himself correctly, auth service issues a token that is further use to check user permission and available products.
+Count rule (applied on both refs):
 
-- **Chat Service** - a service that uses SignalR to give agents ability to chat with each other.
+- non-empty physical lines in UTF-8/UTF-8-SIG text,
+- comments/usings/braces included,
+- SQL embedded inside C# included,
+- formula equivalent to `sum(bool(line.strip()) for line in text.splitlines())`.
 
-- **Payment Service** - main responsibilities: create Policy Account, show Policy Account list, register in payments from bank statement file. \
-  This module is taking care of a managing policy accounts. Once the policy is created, an account is created in this service with expected money income. PaymentService also has an implementation of a scheduled process where CSV file with payments is imported and payments are assigned to policy accounts. This component shows asynchronous communication between services using RabbitMQ and ability to create background jobs. It also features accessing database using Dapper.
+Measured KPI totals:
 
-- **Policy Service** - creates offers, converts offers to insurance policies. \
-  In this service we demonstrated usage of CQRS pattern for better read/write operation isolation. This service demonstrates two ways of communication between services: synchronous REST based calls to `PricingService` through HTTP Client to get the price, and asynchronous event based using RabbitMQ to publish information about newly created policies. In this service we also access RDBMS using NHibernate.
+| Metric | Value |
+| --- | ---: |
+| Base slice (95 files) | 3019 |
+| Head slice (15 files) | 1527 |
+| Fewer lines | 1492 |
+| Reduction | 49.42% |
 
-- **Policy Search Service** - provides insurance policy search. \
-  This module listens for events from RabbitMQ, converts received DTOs to “read model” and indexes given model in ElasticSearch to provide advanced search capabilities.
+KPI interpretation:
 
-- **Pricing Service** - a service responsible for calculation of price for given insurance product based on its parametrization. \
-  For each product a tariff should be defined. The tariff is a set of rules on the basis of which the price is calculated. DynamicExpresso was used to parse the rules. During the policy purchase process, the `PolicyService` connects with this service to calculate a price. Price is calculated based on user’s answers for defined questions.
+- This KPI is a **mixed implementation slice** (SQL repositories + service wrappers + tariff calculator), not pure domain logic.
+- In the head slice, **1168 / 1527** lines are in `Repositories`, and **359 / 1527** lines are in service wrappers + `TariffCalculator`.
+- The `|` / `;` / `~` wire format replaced typed DTO responses; server-side formatting code is counted, client-side parsing cost is not.
+- Generated Graft NuGet clients/gateway are outside this count, just as third-party library source code was outside the previous stack's count.
 
-- **Product Service** - simple insurance product catalog. \
-  It provides basic information about each insurance product and its parameters that can be customized while creating an offer for a customer.
+## Exposed public surface
 
-- **Document Service** - this service uses JS Report to generate pdf certificates.
+Modules:
 
-- **Dashboard Service** - Dashboard that presents sales statistics. \
-  Business dashboards that presents our agents sales results. Dashboard service subscribes to events of selling policies and index sales data in ElasticSearch. Then ElasticSearch aggregation framework is used to calculate sales stats like: total sales and number of policies per product per time period, sales per agent in given time period and sales timeline. Sales stats are nicely visualized using ChartJS.
+- `ProductService.dll`
+- `PricingService.dll`
+- `PolicyService.dll`
+- `PolicySearchService.dll`
+- `PaymentService.dll`
+- `DashboardService.dll`
+- `AuthService.dll`
 
-Each business microservice has also **.Api project** (`PaymentService.Api`, `PolicyService.Api` etc.), where we defined commands, events, queries and operations and **.Test project** (`PaymentService.Test`, `PolicyService.Test`) with unit and integration tests.
+Types and methods (names have no `Async` suffix):
 
-## Running with Docker
+- `ProductService.Services.ProductCatalogService`
+  - `FindAllProducts`, `FindProductByCode`, `CreateProductDraft`, `ActivateProduct`, `DiscontinueProduct`
+- `PricingService.Services.PriceCalculationService`
+  - `CalculatePrice`
+- `PolicyService.Services.PolicySalesService`
+  - `CreateOffer`, `CreatePolicy`, `GetPolicyDetails`, `TerminatePolicy`
+- `PolicySearchService.Services.PolicySearch`
+  - `SearchPolicies`
+- `PaymentService.Services.PaymentAccountService`
+  - `GetAccountBalance`
+- `DashboardService.Services.SalesDashboardService`
+  - `GetAgentsSales`, `GetTotalSales`, `GetSalesTrends`
+- `AuthService.Services.AgentAuthService`
+  - `Authenticate`, `GetAgentByLogin`
 
-You must install Docker & Docker Compose before. \
-Scripts have been divided into two parts:
+`CreateOffer` calls the pricing library in-process. It does not use HTTP.
 
-- [`infra.yml`](scripts/infra.yml) runs the necessary infrastructure.
-- [`app.yml`](scripts/app.yml) is used to run the application.
+A composite record joins fields with `|`. Child lists use `;`, and child fields use `~`. Dates are `yyyy-MM-dd`. Money uses invariant `0.00`. A missing product is an empty string. An empty list is an empty array. A missing environment variable or a broken business rule throws `InvalidOperationException` with a stable message.
 
-You can use scripts to build/run/stop/down all containers.
+Examples:
 
-To run the whole solution:
+- Product list: `TRI|Safe Traveller|Travel insurance|/static/travel.jpg|10|plane|Active`
+- Product detail appends covers and questions: `C2~Illness~~false~5000.00;C3~Assistance~~true~` and `DESTINATION~choice~1~Destination~EUR=Europe,WORLD=World,PL=Poland`
+- Price: `36.00|C2=26.00;C3=10.00`
+- Offer: `{offerNumber}|36.00|C2=26.00;C3=10.00`
+- Policy details: `{number}|TRI|2026-06-01|2027-06-01|Ada Lovelace|36.00|C2;C3`
+- Termination: `{number}|{moneyToReturn}`
+- Account: `{policyNumber}|{accountNumber}|{balance}` (a new policy's expected premium makes the balance negative)
+- Search: `{policyNumber}|{holder}|{product}|{status}`
+- Agent sales: `jimmy.solid|2|200.00`
+- Total sales starts with `total|{count}|{premium}` and then one line per product
+- Trends: `{periodStart}|{count}|{premium}` with unit `Day`, `Week`, `Month`, or `Year`
+- Authenticate: `admin|SALESMAN;USER|static/avatars/admin.png|TRI;HSI;FAI;CAR`
+- Agent card: `admin|static/avatars/admin.png|TRI;HSI;FAI;CAR`
 
-```bash
-cd scripts
-./infra-run.sh
-./app-run.sh
+`CreateProductDraft` takes `code`, `name`, `image`, `description`, `maxNumberOfInsured`, `icon`, encoded covers, and encoded questions. `CalculatePrice` and `CreateOffer` take `productCode`, `policyFrom`, `policyTo`, covers such as `C2;C3`, and answers such as `DESTINATION=EUR;NUM_OF_ADULTS=1;NUM_OF_CHILDREN=0`.
+
+The runtime image is `mcr.microsoft.com/dotnet/runtime:10.0`. The host replaces the platform stub of `Microsoft.Data.SqlClient` with the unix implementation, because GG loads the flat DLL.
+
+This demo starts the stack without `GG_PROJECT_KEY`.
+
+## 1) Start Docker stack with GG
+
+From `ports/gc-dotnetcore-microservices-poc`:
+
+```powershell
+docker compose -f docker-compose.graft.yml up --build -d
 ```
 
-> If ElasticSearch fails to start, try running `sudo sysctl -w vm.max_map_count=262144` first
+Ports:
 
-Once the application and infrastructure are started you can open http://localhost:8080 in your browser and see our welcome page.
-Once there you can use Account menu item to log into the system. Valid users and passwords can be found [here](https://github.com/asc-lab/dotnetcore-microservices-poc/blob/master/AuthService/DataAccess/InsuranceAgentsInMemoryDb.cs). You can for example login as admin with password admin.
+- `8092` Gateway (`/nuget`, WebSocket)
+- `8093` Graft Vision
+- `1435` SQL Server (seeded products, tariffs, agents, accounts, search rows, and sales facts)
 
-## Manual running
+WebSocket endpoint for clients:
 
-### Prerequisites
+- `ws://localhost:8092/ws`
 
-Install [PostgreSQL](https://www.postgresql.org/) version >= 10.0.
+Graft Vision:
 
-Install [RabbitMQ](https://www.rabbitmq.com/).
+- `http://localhost:8093`
 
-Install [Elasticsearch](https://www.elastic.co/guide/en/elasticsearch/reference/current/install-elasticsearch.html) version >= 6.
+Demo logins live in the seed: `admin` / `admin`, `jimmy.solid` / `secret`, `danny.solid` / `secret`.
 
-### Init databases
+## 2) Install generated clients
 
-#### Windows
+After the container logs `dotnet add package`, open `http://localhost:8092/nuget` and use the package ids printed there.
 
-```bash
-cd postgres
-"PATH_TO_PSQL.EXE" --host "localhost" --port EXAMPLE_PORT --username "EXAMPLE_USER" --file "createdatabases.sql"
+The ids below are an example from one generation (`zp5n7a`). Without a `GG_PROJECT_KEY` linked to your Graftcode account, every generation gets a new suffix. With that key the id stays stable.
+
+- `graft.nuget.productservice_zp5n7a` 1.0.0
+- `graft.nuget.pricingservice_zp5n7a` 1.0.0
+- `graft.nuget.policyservice_zp5n7a` 1.0.0
+- `graft.nuget.policysearchservice_zp5n7a` 1.0.0
+- `graft.nuget.paymentservice_zp5n7a` 1.0.0
+- `graft.nuget.dashboardservice_zp5n7a` 1.0.0
+- `graft.nuget.authservice_zp5n7a` 1.0.0
+
+NuGet will not replace an existing `1.0.0` when the package id stays the same. When the hash changes, delete the old package folder and restore from the feed printed in the container log. When the hash stays and the host surface changed, delete the cached `1.0.0` and restore from that same feed.
+
+Runtime config (replace the suffix with the one from the log):
+
+```powershell
+$env:GRAFTCODE_CONFIG_NUGET_PRODUCTSERVICE = "name=graft.nuget.ProductService; runtime=netcore; modules=ProductService.dll; host=ws://localhost:8092/ws; stateless=true"
+$env:GRAFTCODE_CONFIG_NUGET_PRICINGSERVICE = "name=graft.nuget.PricingService; runtime=netcore; modules=PricingService.dll; host=ws://localhost:8092/ws; stateless=true"
+$env:GRAFTCODE_CONFIG_NUGET_POLICYSERVICE = "name=graft.nuget.PolicyService; runtime=netcore; modules=PolicyService.dll; host=ws://localhost:8092/ws; stateless=true"
+$env:GRAFTCODE_CONFIG_NUGET_POLICYSEARCHSERVICE = "name=graft.nuget.PolicySearchService; runtime=netcore; modules=PolicySearchService.dll; host=ws://localhost:8092/ws; stateless=true"
+$env:GRAFTCODE_CONFIG_NUGET_PAYMENTSERVICE = "name=graft.nuget.PaymentService; runtime=netcore; modules=PaymentService.dll; host=ws://localhost:8092/ws; stateless=true"
+$env:GRAFTCODE_CONFIG_NUGET_DASHBOARDSERVICE = "name=graft.nuget.DashboardService; runtime=netcore; modules=DashboardService.dll; host=ws://localhost:8092/ws; stateless=true"
+$env:GRAFTCODE_CONFIG_NUGET_AUTHSERVICE = "name=graft.nuget.AuthService; runtime=netcore; modules=AuthService.dll; host=ws://localhost:8092/ws; stateless=true"
 ```
 
-In my case this command looks like:
+## 3) Run the e2e verifier
 
-```bash
-cd postgres
-"C:\Program Files\PostgreSQL\9.6\bin\psql.exe" --host "localhost" --port 5432 --username "postgres" --file "createdatabases.sql"
+```powershell
+dotnet run --project C:\Coding\Marketing\gc-insurance-graft-e2e\gc-insurance-graft-e2e.csproj -c Release -- `
+  --host "ws://localhost:8092/ws" `
+  --stateless true `
+  --report "C:\Coding\Marketing\gc-insurance-graft-e2e\reports\insurance-graft-e2e.json"
 ```
 
-#### Linux
+The runner uses the PackageReferences checked into its project file. Those ids are one generation; replace them when `/nuget` prints a new suffix.
 
-```bash
-sudo -i -u postgres
-psql --host "localhost" --port 5432 --username "postgres" --file "PATH_TO_FILE/createdatabases.sql"
+Exit codes: `0` all checks passed, `1` an assertion failed, `2` the run was blocked before assertions.
+
+## 4) Stop
+
+```powershell
+docker compose -f docker-compose.graft.yml down
 ```
 
-This script should create `lab_user` user and the following databases: `lab_netmicro_payments`, `lab_netmicro_jobs`, `lab_netmicro_policy` and `lab_netmicro_pricing`.
+## Outside this demo
 
-### Run Eureka
+Bank-statement CSV import remains outside this demo and is not part of the exposed graft surface.
 
-Service registry and discovery tool for our project is Eureka. It is included in the project.
-In order to start it open terminal / command prompt.
+## What the port removed
 
-```bash
-cd eureka-server
-./gradlew.[bat] bootRun
+This rewrite runs business calls through class libraries loaded by the graft host and removes previously exposed product surface components: HTTP hosts/controllers, Swagger, MediatR request pipeline, Eureka/RestEase integrations, RabbitMQ/outbox, Hangfire, SignalR, ElasticSearch, Marten, NHibernate/EF runtime usage on the active path, plus UI/chat/gateway projects.
+
+## Slice manifest and reproducibility details
+
+Use this command to reproduce the KPI totals with pinned SHAs and print full manifests:
+
+```powershell
+pwsh .\scripts\line-count-slice.ps1 -BaseSha 6500daaf -HeadSha 83db31210fec5cda5f6e6685148ad6606950836b -ShowManifest
 ```
 
-This should start Eureka and you should be able to go to http://localhost:8761/ and see Eureka management panel.
+Head manifest (`83db31210fec5cda5f6e6685148ad6606950836b`, exact files counted):
 
-### Build
+- `ProductService/Repositories/SqlProductRepository.cs`
+- `ProductService/Services/ProductCatalogService.cs`
+- `PricingService/Repositories/SqlTariffRepository.cs`
+- `PricingService/Services/PriceCalculationService.cs`
+- `PricingService/Domain/TariffCalculator.cs`
+- `PolicyService/Repositories/SqlPolicyRepository.cs`
+- `PolicyService/Services/PolicySalesService.cs`
+- `PolicySearchService/Repositories/SqlPolicySearchRepository.cs`
+- `PolicySearchService/Services/PolicySearch.cs`
+- `PaymentService/Repositories/SqlPaymentRepository.cs`
+- `PaymentService/Services/PaymentAccountService.cs`
+- `DashboardService/Repositories/SqlDashboardRepository.cs`
+- `DashboardService/Services/SalesDashboardService.cs`
+- `AuthService/Repositories/SqlAgentRepository.cs`
+- `AuthService/Services/AgentAuthService.cs`
 
-Build all projects from command line without test:
+Base manifest (`6500daaf`, exact selection rule):
 
-#### Windows
+- include all `*.cs` under these services:
+  - `AuthService`, `DashboardService`, `PaymentService`, `PolicySearchService`, `PolicyService`, `PricingService`, `ProductService`
+- include only subtrees:
+  - `Domain/**`, `Commands/**`, `Queries/**`, `DataAccess/**`
+- exclude files:
+  - `PaymentService/Domain/BankStatementFile.cs`
+  - `PaymentService/Domain/InPaymentRegistrationService.cs`
 
-```bash
-cd scripts
-build-without-tests.bat
-```
+Excluded from KPI on both sides:
 
-#### Linux
+- controllers and API/DTO contract projects (`*.Api`)
+- `Init/**`, `Messaging/**`, `Listeners/**`, `RestClients/**`
+- host/bootstrap/runtime wiring (`Program`, `Startup`, compose/runtime shell)
+- in-repo tests
+- CSV import behavior and related files
+- `Graftcode/GraftAsync.cs` (11 lines; excluded unless added symmetrically on both sides)
+- `db/seed.sql` (about 308 non-empty lines; SQL seed artifact, outside C# KPI)
+- NHibernate XML mappings (`*.hbm.xml`) on the base side (outside `*.cs` counting rule)
 
-```bash
-cd scripts
-./build-without-tests.sh
-```
+Context-only whole-base number (not KPI): in `6500daaf`, the same seven services contain **5302** non-empty `*.cs` lines across **164** files when counted without the KPI slice filter.
 
-Build all projects from command with test:
+## Troubleshooting
 
-#### Windows
-
-```bash
-cd scripts
-build.bat
-```
-
-#### Linux
-
-```bash
-cd scripts
-./build.sh
-```
-
-## Run specific service
-
-Go to folder with specific service (`PolicyService`, `ProductService` etc) and use `dotnet run` command.
+- `dotnet add package` takes its source from the container log. There is no fixed feed URL. Without a project key, each start prints a new `https://grft.dev/<guid>__free`. If restore fails, restart the host and use the URL from that log.
+- If port `8092` is occupied, change the published ports in `docker-compose.graft.yml` and point the client host at the new WebSocket URL.
+- Restore under this directory uses the repo-local `NuGet.Config` (nuget.org only).
